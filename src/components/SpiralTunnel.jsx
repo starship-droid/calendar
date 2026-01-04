@@ -15,8 +15,6 @@ const SpiralTunnel = () => {
   useEffect(() => {
     if (!containerRef.current) return;
 
-    console.log('[Spiral] init');
-
     /* ---------- SCENE ---------- */
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
@@ -54,21 +52,27 @@ const SpiralTunnel = () => {
       0xc77dff, 0xff69b4, 0xff1493, 0xdc143c
     ];
 
-    /* ---------- SPIRAL CURVE ---------- */
+    /* ---------- SPIRAL CURVE (ALIGNED JANUARIES) ---------- */
     const points = [];
-    const years = 223;
-    const months = years * 12;
+    const startYear = 2000;
+    const endYear = 2222;
+    const years = endYear - startYear + 1;
+    const totalMonths = years * 12;
     const segments = 3000;
-    const turns = 18;
+
+    const turnsPerYear = 1; // one full rotation per year
 
     for (let i = 0; i <= segments; i++) {
-      const t = i / segments;
-      const angle = t * Math.PI * 2 * turns;
+      const t = i / segments; // 0 → 1
 
-      const radius =
-        3.5 * Math.pow(1 - t, 2.3); // tightening inward
+      // Reverse t for inside = 2000, outside = 2222
+      const tRev = 1 - t;
 
-      const z = -t * 180;
+      const totalTurns = turnsPerYear * years * tRev;
+      const angle = totalTurns * Math.PI * 2;
+
+      const radius = 3.5 * Math.pow(tRev, 2.3); // shrinking inward
+      const z = -t * 180; // depth along z
 
       points.push(
         new THREE.Vector3(
@@ -98,29 +102,25 @@ const SpiralTunnel = () => {
     geometry.clearGroups();
 
     const facesPerSegment = radialSegments * 6;
-    const segmentsPerMonth = Math.floor(tubeSegments / months);
+    const segmentsPerMonth = Math.floor(tubeSegments / totalMonths);
 
     const materials = [];
 
-    for (let m = 0; m < months; m++) {
+    for (let m = 0; m < totalMonths; m++) {
       const start = m * segmentsPerMonth * facesPerSegment;
       const count = segmentsPerMonth * facesPerSegment;
 
       geometry.addGroup(start, count, m);
 
       const monthIndex = m % 12;
-      const year = 2000 + Math.floor(m / 12);
+      const year = startYear + Math.floor(m / 12);
 
       const mat = new THREE.MeshBasicMaterial({
         color: monthColors[monthIndex],
         side: THREE.DoubleSide
       });
 
-      mat.userData = {
-        year,
-        monthName: monthNames[monthIndex]
-      };
-
+      mat.userData = { year, monthName: monthNames[monthIndex] };
       materials.push(mat);
     }
 
@@ -142,6 +142,13 @@ const SpiralTunnel = () => {
 
     /* ---------- LIGHT ---------- */
     scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+
+    /* ---------- SCROLL NAVIGATION ---------- */
+    const handleScroll = (e) => {
+      e.preventDefault();
+      setDepth(d => Math.max(-50, Math.min(230, d + e.deltaY * 0.05)));
+    };
+    window.addEventListener('wheel', handleScroll, { passive: false });
 
     /* ---------- CLICK ---------- */
     const handleClick = (e) => {
@@ -166,7 +173,6 @@ const SpiralTunnel = () => {
         }
       }
     };
-
     containerRef.current.addEventListener('click', handleClick);
 
     /* ---------- ANIMATE ---------- */
@@ -175,6 +181,8 @@ const SpiralTunnel = () => {
 
       spiral.rotation.z += 0.001;
       wireframe.rotation.z += 0.001;
+
+      camera.position.z = 5 - depth; // scroll effect
 
       renderer.render(scene, camera);
     };
@@ -191,22 +199,15 @@ const SpiralTunnel = () => {
         containerRef.current.clientHeight
       );
     };
-
     window.addEventListener('resize', handleResize);
 
     return () => {
-      console.log('[Spiral] cleanup');
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('wheel', handleScroll);
       containerRef.current.removeEventListener('click', handleClick);
       renderer.dispose();
     };
   }, []);
-
-  useEffect(() => {
-    if (cameraRef.current) {
-      cameraRef.current.position.z = 5 - depth;
-    }
-  }, [depth]);
 
   return (
     <div className="w-full h-screen bg-black relative">
@@ -217,21 +218,6 @@ const SpiralTunnel = () => {
           {selectedDate.monthName} {selectedDate.year}
         </div>
       )}
-
-      <div className="absolute bottom-8 right-8 flex gap-4">
-        <button
-          onClick={() => setDepth(d => d - 5)}
-          className="px-4 py-2 bg-blue-600 text-white rounded"
-        >
-          In
-        </button>
-        <button
-          onClick={() => setDepth(d => d + 5)}
-          className="px-4 py-2 bg-blue-600 text-white rounded"
-        >
-          Out
-        </button>
-      </div>
     </div>
   );
 };
