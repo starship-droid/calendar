@@ -1,242 +1,228 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 
+const START_YEAR = 2000;
+const END_YEAR = 2032;
+
 const SpiralTunnel = () => {
   const containerRef = useRef(null);
-  const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
   const spiralGroupRef = useRef(null);
+  const solidMeshesRef = useRef([]);
+
+  const raycaster = useRef(new THREE.Raycaster());
+  const mouse = useRef(new THREE.Vector2());
+
   const [depth, setDepth] = useState(0);
+  const [hoverInfo, setHoverInfo] = useState(null);
+  const [hoverPos, setHoverPos] = useState({ x: 0, y: 0 });
+  const [selectedInfo, setSelectedInfo] = useState(null);
+
+  const targetCameraPos = useRef(null);
+  const targetLookAt = useRef(null);
+  const initialCameraState = useRef(null);
+
+  const monthColors = [
+    0xFF6B6B, 0xFF8E53, 0xFFC93C, 0x95E1D3,
+    0x38E54D, 0x45B7D1, 0x4A90E2, 0x7B68EE,
+    0xC77DFF, 0xFF69B4, 0xFF1493, 0xDC143C
+  ];
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
+
+
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Scene setup
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0a);
-    sceneRef.current = scene;
 
-    // Camera setup
-    const camera = new THREE.PerspectiveCamera(
-      75,
-      containerRef.current.clientWidth / containerRef.current.clientHeight,
-      0.1,
-      2000
-    );
-    camera.position.z = 5;
+    const camera = new THREE.PerspectiveCamera(75, containerRef.current.clientWidth / containerRef.current.clientHeight, 0.1, 2000);
+
+    camera.position.set(0, 0, 5);
+    camera.lookAt(0, 0, 0);
+
     cameraRef.current = camera;
 
-    // Renderer setup
+    initialCameraState.current = {
+      position: camera.position.clone(),
+      quaternion: camera.quaternion.clone()
+    };
+
+
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Month colors - vibrant and distinct
-    const monthColors = [
-      0xFF6B6B, // Jan - Red
-      0xFF8E53, // Feb - Orange
-      0xFFC93C, // Mar - Yellow
-      0x95E1D3, // Apr - Mint
-      0x38E54D, // May - Green
-      0x45B7D1, // Jun - Cyan
-      0x4A90E2, // Jul - Blue
-      0x7B68EE, // Aug - Purple
-      0xC77DFF, // Sep - Violet
-      0xFF69B4, // Oct - Pink
-      0xFF1493, // Nov - Deep Pink
-      0xDC143C, // Dec - Crimson
-    ];
-
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    // Create spiral group that we can keep adding to
     const spiralGroup = new THREE.Group();
     scene.add(spiralGroup);
     spiralGroupRef.current = spiralGroup;
 
-    // Create spiral segments
-    const createSpiralSegments = (startYear, numYears, startZ) => {
-      const segmentsPerYear = 120; // Segments per full rotation (year)
-      const segmentsPerMonth = segmentsPerYear / 12; // 10 segments per month
-      const totalSegments = segmentsPerYear * numYears;
-      const turnsPerYear = 1;
-      const width = 0.15; // Much thinner tube
-      
-      for (let year = 0; year < numYears; year++) {
-        for (let month = 0; month < 12; month++) {
-          const points = [];
-          const startSeg = year * segmentsPerYear + month * segmentsPerMonth;
-          const endSeg = startSeg + segmentsPerMonth + 1; // +1 for overlap
-          
-          for (let i = startSeg; i <= endSeg; i++) {
-            const t = i / segmentsPerYear; // Progress through this year
-            const globalT = (year + t) / numYears; // Progress through all years
-            const angle = t * Math.PI * 2 * turnsPerYear;
-            const radius = 3 * (1 - globalT * 0.7);
-            const z = startZ - (year + t) * 8;
-            
-            const x = Math.cos(angle) * radius;
-            const y = Math.sin(angle) * radius;
-            
-            points.push(new THREE.Vector3(x, y, z));
-          }
+    const years = END_YEAR - START_YEAR + 1;
+    const segmentsPerYear = 120;
+    const segmentsPerMonth = segmentsPerYear / 12;
+    const turnsPerYear = 1;
+    const tubeRadius = 0.1;
+    const radialSegments = 6;
+    const zStep = 3 / segmentsPerYear;
 
-          const curve = new THREE.CatmullRomCurve3(points);
-          const tubeGeometry = new THREE.TubeGeometry(curve, segmentsPerMonth, width, 4, false);
-          
-          const material = new THREE.MeshBasicMaterial({
-            color: monthColors[month],
-            side: THREE.DoubleSide
-          });
+    let globalIndex = 0;
+    let lastZ = 5;
 
-          const segment = new THREE.Mesh(tubeGeometry, material);
-          segment.userData = { 
-            year: startYear + year, 
-            month: monthNames[month],
-            startZ: startZ - year * 8
-          };
-          spiralGroup.add(segment);
+    for (let y = 0; y < years; y++) {
+      for (let m = 0; m < 12; m++) {
+        const year = START_YEAR + y;
+        const points = [];
+        const startIndex = globalIndex;
 
-          // Add wireframe
-          const wireframeGeometry = new THREE.TubeGeometry(curve, segmentsPerMonth, width * 1.02, 4, false);
-          const wireframeMaterial = new THREE.MeshBasicMaterial({
-            color: 0xffffff,
-            wireframe: true,
-            transparent: true,
-            opacity: 0.4
-          });
-          const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-          spiralGroup.add(wireframe);
+        for (let i = 0; i <= segmentsPerMonth; i++) {
+          const g = startIndex + i;
+          const t = g / (segmentsPerYear * years);
+          const angle = -t * Math.PI * 2 * turnsPerYear * years;
+          const radius = 1 * (1 - t * 0.7);
+          lastZ -= zStep;
+          points.push(new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle) * radius, lastZ));
         }
+
+        globalIndex += segmentsPerMonth;
+        const curve = new THREE.CatmullRomCurve3(points);
+
+        const solid = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, segmentsPerMonth * 2, tubeRadius, radialSegments, false),
+          new THREE.MeshBasicMaterial({ color: monthColors[m], side: THREE.DoubleSide })
+        );
+        solid.userData = { year, month: monthNames[m], monthIndex: m };
+        spiralGroup.add(solid);
+        solidMeshesRef.current.push(solid);
+
+        const wire = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, daysInMonth(year, m), tubeRadius * 1.01, radialSegments, false),
+          new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.35 })
+        );
+        spiralGroup.add(wire);
       }
-    };
+    }
 
-    // Initial creation - create spirals in both directions
-    const currentYear = 2025;
-    createSpiralSegments(currentYear - 50, 100, 5); // Create 100 years worth
+    const today = new Date();
+    solidMeshesRef.current.forEach(mesh => {
+      if (mesh.userData.year === today.getFullYear() && mesh.userData.monthIndex === today.getMonth()) {
+        mesh.material = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      }
+    });
 
-    // Add ambient light
-    const ambientLight = new THREE.AmbientLight(0xffffff, 1);
-    scene.add(ambientLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 1));
 
-    // Animation loop
     const animate = () => {
       requestAnimationFrame(animate);
+
+      if (targetCameraPos.current) {
+        camera.position.lerp(targetCameraPos.current, 0.08);
+        camera.lookAt(targetLookAt.current);
+      } else {
+        camera.position.z = 5 - depth;
+      }
+
       renderer.render(scene, camera);
     };
     animate();
 
-    // Handle window resize
-    const handleResize = () => {
-      if (!containerRef.current) return;
-      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
-    };
-    window.addEventListener('resize', handleResize);
-
-    // Handle scroll/wheel for navigation
-    const handleWheel = (e) => {
+    const handleWheel = e => {
       e.preventDefault();
-      const delta = e.deltaY * 0.01;
-      setDepth(prev => prev + delta);
+      targetCameraPos.current = null;
+      targetLookAt.current = null;
+      setDepth(d => THREE.MathUtils.clamp(d + e.deltaY * 0.01, -200, 200));
     };
-    
-    containerRef.current.addEventListener('wheel', handleWheel, { passive: false });
 
-    // Cleanup
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (containerRef.current) {
-        containerRef.current.removeEventListener('wheel', handleWheel);
-        if (renderer.domElement) {
-          containerRef.current.removeChild(renderer.domElement);
-        }
+    const handleKey = e => {
+      if (e.key === 'ArrowUp') setDepth(d => d - 5);
+      if (e.key === 'ArrowDown') setDepth(d => d + 5);
+    };
+
+    const handleMove = e => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.current.setFromCamera(mouse.current, camera);
+      const hits = raycaster.current.intersectObjects(solidMeshesRef.current);
+      if (hits.length) {
+        setHoverInfo(hits[0].object.userData);
+        setHoverPos({ x: e.clientX, y: e.clientY });
+      } else setHoverInfo(null);
+    };
+
+    const handleClick = e => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouse.current.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouse.current.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.current.setFromCamera(mouse.current, camera);
+      const hits = raycaster.current.intersectObjects(solidMeshesRef.current);
+      if (hits.length) {
+        const obj = hits[0].object;
+        setSelectedInfo(obj.userData);
+        const box = new THREE.Box3().setFromObject(obj);
+        const center = box.getCenter(new THREE.Vector3());
+        const size = box.getSize(new THREE.Vector3()).length();
+        const dir = new THREE.Vector3().subVectors(camera.position, center).normalize();
+        targetCameraPos.current = center.clone().add(dir.multiplyScalar(size * 0.8));
+        targetLookAt.current = center.clone();
       }
+    };
+
+    const el = containerRef.current;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    window.addEventListener('keydown', handleKey);
+    renderer.domElement.addEventListener('mousemove', handleMove);
+    renderer.domElement.addEventListener('click', handleClick);
+
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+      window.removeEventListener('keydown', handleKey);
+      renderer.domElement.removeEventListener('mousemove', handleMove);
+      renderer.domElement.removeEventListener('click', handleClick);
       renderer.dispose();
     };
   }, []);
 
-  // Update camera position based on depth
-  useEffect(() => {
-    if (cameraRef.current) {
-      cameraRef.current.position.z = 5 - depth;
-      
-      // Calculate current year based on depth
-      const yearOffset = Math.floor(depth / 8);
-      const currentYear = 2025 - yearOffset;
-      
-      // Find closest month segment
-      if (spiralGroupRef.current) {
-        let closestSegment = null;
-        let closestDistance = Infinity;
-        
-        spiralGroupRef.current.children.forEach(child => {
-          if (child.userData.year) {
-            const distance = Math.abs(child.userData.startZ - cameraRef.current.position.z);
-            if (distance < closestDistance) {
-              closestDistance = distance;
-              closestSegment = child;
-            }
-          }
-        });
-      }
-    }
-  }, [depth]);
+  const resetView = () => {
+    setDepth(0);
+    setSelectedInfo(null);
 
-  const handleDepthChange = (delta) => {
-    setDepth(prev => prev + delta);
+    targetCameraPos.current = null;
+    targetLookAt.current = null;
+
+    if (!cameraRef.current || !initialCameraState.current) return;
+
+    const camera = cameraRef.current;
+    const { position, quaternion } = initialCameraState.current;
+
+    camera.position.copy(position);
+    camera.quaternion.copy(quaternion);
   };
 
-  const currentYearOffset = Math.floor(depth / 8);
-  const currentYear = 2025 - currentYearOffset;
 
   return (
-    <div className="w-full h-screen flex flex-col bg-black">
-      <div ref={containerRef} className="flex-1" />
-      
-      <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex gap-4 items-center">
-        <button
-          onClick={() => handleDepthChange(-2)}
-          className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold shadow-lg transition-colors"
-        >
-          ← Future
-        </button>
-        
-        <div className="px-6 py-3 bg-gray-800 text-white rounded-lg font-mono">
-          Year: {currentYear}
-        </div>
-        
-        <button
-          onClick={() => handleDepthChange(2)}
-          className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold shadow-lg"
-        >
-          Past →
-        </button>
-      </div>
+    <div className="w-full h-screen bg-black relative">
+      <div ref={containerRef} className="w-full h-full" />
 
-      <div className="absolute top-8 left-1/2 transform -translate-x-1/2 text-white text-center bg-black bg-opacity-50 px-6 py-4 rounded-lg">
-        <h1 className="text-2xl font-bold mb-2">Spiral Calendar</h1>
-        <p className="text-sm text-gray-300">Each rotation = 1 year | Each color = 1 month</p>
-        <p className="text-xs text-gray-400 mt-1">Scroll to navigate through time</p>
-      </div>
-
-      <div className="absolute top-8 right-8 bg-black bg-opacity-50 px-4 py-3 rounded-lg text-white text-xs">
-        <div className="font-bold mb-2">Month Colors:</div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-          {['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'].map((month, i) => (
-            <div key={month} className="flex items-center gap-2">
-              <div 
-                className="w-3 h-3 rounded-sm" 
-                style={{ backgroundColor: `#${[0xFF6B6B, 0xFF8E53, 0xFFC93C, 0x95E1D3, 0x38E54D, 0x45B7D1, 0x4A90E2, 0x7B68EE, 0xC77DFF, 0xFF69B4, 0xFF1493, 0xDC143C][i].toString(16).padStart(6, '0')}` }}
-              />
-              <span>{month}</span>
-            </div>
-          ))}
+      {hoverInfo && (
+        <div className="absolute pointer-events-none bg-black/80 text-white text-xs px-3 py-1 rounded"
+          style={{ left: hoverPos.x + 12, top: hoverPos.y + 12 }}>
+          {hoverInfo.month} {hoverInfo.year}
         </div>
-      </div>
+      )}
+
+      {selectedInfo && (
+        <div className="absolute top-4 left-4 bg-black/80 text-white px-4 py-2 rounded">
+          Selected: {selectedInfo.month} {selectedInfo.year}
+        </div>
+      )}
+
+      <button onClick={resetView} className="absolute top-4 right-4 bg-blue-500 text-white px-4 py-2 rounded">
+        Reset
+      </button>
     </div>
   );
 };
