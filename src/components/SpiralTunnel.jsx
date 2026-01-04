@@ -3,160 +3,234 @@ import * as THREE from 'three';
 
 const SpiralTunnel = () => {
   const containerRef = useRef(null);
-  const sceneRef = useRef(null);
   const cameraRef = useRef(null);
   const rendererRef = useRef(null);
   const spiralRef = useRef(null);
+  const raycasterRef = useRef(new THREE.Raycaster());
+  const mouseRef = useRef(new THREE.Vector2());
+
   const [depth, setDepth] = useState(0);
+  const [selectedDate, setSelectedDate] = useState(null);
 
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Scene setup
+    console.log('[Spiral] init');
+
+    /* ---------- SCENE ---------- */
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x000000);
-    sceneRef.current = scene;
 
-    // Camera setup
+    /* ---------- CAMERA ---------- */
     const camera = new THREE.PerspectiveCamera(
       75,
-      containerRef.current.clientWidth / containerRef.current.clientHeight,
+      containerRef.current.clientWidth /
+        containerRef.current.clientHeight,
       0.1,
-      1000
+      2000
     );
     camera.position.z = 5;
     cameraRef.current = camera;
 
-    // Renderer setup
+    /* ---------- RENDERER ---------- */
     const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+    renderer.setSize(
+      containerRef.current.clientWidth,
+      containerRef.current.clientHeight
+    );
     containerRef.current.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Create spiral geometry
-    const createSpiral = () => {
-      const points = [];
-      const segments = 500;
-      const turns = 15;
-      const width = 0.8;
-      
-      for (let i = 0; i < segments; i++) {
-        const t = i / segments;
-        const angle = t * Math.PI * 2 * turns;
-        const radius = 3 * (1 - t * 0.85);
-        const z = -t * 50 + 5;
-        
-        const x = Math.cos(angle) * radius;
-        const y = Math.sin(angle) * radius;
-        
-        points.push(new THREE.Vector3(x, y, z));
-      }
+    /* ---------- DATA ---------- */
+    const monthNames = [
+      'January', 'February', 'March', 'April',
+      'May', 'June', 'July', 'August',
+      'September', 'October', 'November', 'December'
+    ];
 
-      const curve = new THREE.CatmullRomCurve3(points);
-      const tubeGeometry = new THREE.TubeGeometry(curve, segments, width, 8, false);
-      
-      // Create gradient material
-      const material = new THREE.MeshBasicMaterial({
-        color: 0x4a90e2,
-        wireframe: false,
+    const monthColors = [
+      0xff6b6b, 0xff8e53, 0xffc93c, 0x95e1d3,
+      0x38e54d, 0x45b7d1, 0x4a90e2, 0x7b68ee,
+      0xc77dff, 0xff69b4, 0xff1493, 0xdc143c
+    ];
+
+    /* ---------- SPIRAL CURVE ---------- */
+    const points = [];
+    const years = 223;
+    const months = years * 12;
+    const segments = 3000;
+    const turns = 18;
+
+    for (let i = 0; i <= segments; i++) {
+      const t = i / segments;
+      const angle = t * Math.PI * 2 * turns;
+
+      const radius =
+        3.5 * Math.pow(1 - t, 2.3); // tightening inward
+
+      const z = -t * 180;
+
+      points.push(
+        new THREE.Vector3(
+          Math.cos(angle) * radius,
+          Math.sin(angle) * radius,
+          z
+        )
+      );
+    }
+
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+
+    /* ---------- TUBE GEOMETRY ---------- */
+    const tubeSegments = segments;
+    const tubeRadius = 0.18;
+    const radialSegments = 8;
+
+    const geometry = new THREE.TubeGeometry(
+      curve,
+      tubeSegments,
+      tubeRadius,
+      radialSegments,
+      false
+    );
+
+    /* ---------- MATERIAL GROUPS (MONTHS) ---------- */
+    geometry.clearGroups();
+
+    const facesPerSegment = radialSegments * 6;
+    const segmentsPerMonth = Math.floor(tubeSegments / months);
+
+    const materials = [];
+
+    for (let m = 0; m < months; m++) {
+      const start = m * segmentsPerMonth * facesPerSegment;
+      const count = segmentsPerMonth * facesPerSegment;
+
+      geometry.addGroup(start, count, m);
+
+      const monthIndex = m % 12;
+      const year = 2000 + Math.floor(m / 12);
+
+      const mat = new THREE.MeshBasicMaterial({
+        color: monthColors[monthIndex],
         side: THREE.DoubleSide
       });
 
-      const spiral = new THREE.Mesh(tubeGeometry, material);
-      scene.add(spiral);
-      spiralRef.current = spiral;
+      mat.userData = {
+        year,
+        monthName: monthNames[monthIndex]
+      };
 
-      // Add wireframe overlay
-      const wireframeGeometry = new THREE.TubeGeometry(curve, segments, width * 1.01, 8, false);
-      const wireframeMaterial = new THREE.MeshBasicMaterial({
+      materials.push(mat);
+    }
+
+    const spiral = new THREE.Mesh(geometry, materials);
+    spiralRef.current = spiral;
+    scene.add(spiral);
+
+    /* ---------- WIREFRAME ---------- */
+    const wireframe = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({
         color: 0xffffff,
         wireframe: true,
         transparent: true,
-        opacity: 0.3
-      });
-      const wireframe = new THREE.Mesh(wireframeGeometry, wireframeMaterial);
-      scene.add(wireframe);
-      spiralRef.current.wireframe = wireframe;
-    };
+        opacity: 0.25
+      })
+    );
+    scene.add(wireframe);
 
-    createSpiral();
+    /* ---------- LIGHT ---------- */
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-    // Add ambient light
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-    scene.add(ambientLight);
+    /* ---------- CLICK ---------- */
+    const handleClick = (e) => {
+      const rect = containerRef.current.getBoundingClientRect();
 
-    // Animation loop
-    const animate = () => {
-      requestAnimationFrame(animate);
-      
-      if (spiralRef.current) {
-        spiralRef.current.rotation.z += 0.002;
-        if (spiralRef.current.wireframe) {
-          spiralRef.current.wireframe.rotation.z += 0.002;
+      mouseRef.current.x =
+        ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      mouseRef.current.y =
+        -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+      raycasterRef.current.setFromCamera(mouseRef.current, camera);
+
+      const hits = raycasterRef.current.intersectObject(spiral);
+
+      if (hits.length > 0) {
+        const hit = hits[0];
+        const matIndex = hit.face.materialIndex;
+        const mat = spiral.material[matIndex];
+
+        if (mat?.userData) {
+          setSelectedDate(mat.userData);
         }
       }
-      
+    };
+
+    containerRef.current.addEventListener('click', handleClick);
+
+    /* ---------- ANIMATE ---------- */
+    const animate = () => {
+      requestAnimationFrame(animate);
+
+      spiral.rotation.z += 0.001;
+      wireframe.rotation.z += 0.001;
+
       renderer.render(scene, camera);
     };
     animate();
 
-    // Handle window resize
+    /* ---------- RESIZE ---------- */
     const handleResize = () => {
-      if (!containerRef.current) return;
-      camera.aspect = containerRef.current.clientWidth / containerRef.current.clientHeight;
+      camera.aspect =
+        containerRef.current.clientWidth /
+        containerRef.current.clientHeight;
       camera.updateProjectionMatrix();
-      renderer.setSize(containerRef.current.clientWidth, containerRef.current.clientHeight);
+      renderer.setSize(
+        containerRef.current.clientWidth,
+        containerRef.current.clientHeight
+      );
     };
+
     window.addEventListener('resize', handleResize);
 
-    // Cleanup
     return () => {
+      console.log('[Spiral] cleanup');
       window.removeEventListener('resize', handleResize);
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
-      }
+      containerRef.current.removeEventListener('click', handleClick);
       renderer.dispose();
     };
   }, []);
 
-  // Update camera position based on depth
   useEffect(() => {
     if (cameraRef.current) {
       cameraRef.current.position.z = 5 - depth;
     }
   }, [depth]);
 
-  const handleDepthChange = (delta) => {
-    setDepth(prev => Math.max(-40, Math.min(10, prev + delta)));
-  };
-
   return (
-    <div className="w-full h-screen flex flex-col bg-black">
-      <div ref={containerRef} className="flex-1" />
-      
-      <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex gap-4 items-center">
-        <button
-          onClick={() => handleDepthChange(-2)}
-          className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold shadow-lg transition-colors"
-        >
-          ← Go Out
-        </button>
-        
-        <div className="px-4 py-2 bg-gray-800 text-white rounded-lg font-mono">
-          Depth: {depth.toFixed(1)}
-        </div>
-        
-        <button
-          onClick={() => handleDepthChange(2)}
-          className="px-6 py-3 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold shadow-lg transition-colors"
-        >
-          Go In →
-        </button>
-      </div>
+    <div className="w-full h-screen bg-black relative">
+      <div ref={containerRef} className="w-full h-full" />
 
-      <div className="absolute top-8 left-1/2 transform -translate-x-1/2 text-white text-center">
-        <h1 className="text-2xl font-bold mb-2">3D Spiral Tunnel</h1>
-        <p className="text-sm text-gray-300">Navigate through the infinite spiral</p>
+      {selectedDate && (
+        <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg font-semibold">
+          {selectedDate.monthName} {selectedDate.year}
+        </div>
+      )}
+
+      <div className="absolute bottom-8 right-8 flex gap-4">
+        <button
+          onClick={() => setDepth(d => d - 5)}
+          className="px-4 py-2 bg-blue-600 text-white rounded"
+        >
+          In
+        </button>
+        <button
+          onClick={() => setDepth(d => d + 5)}
+          className="px-4 py-2 bg-blue-600 text-white rounded"
+        >
+          Out
+        </button>
       </div>
     </div>
   );
